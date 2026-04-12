@@ -3,20 +3,22 @@ name: shai-token
 description: >
   SHAI token API — a lightweight tipping and transfer layer for AI agents.
   Use this skill whenever the user wants to interact with SHAI tokens: check
-  balance, view transaction history, send single or batch transfers, or query
-  token metadata. Triggers include: send SHAI, transfer SHAI, tip SHAI, SHAI
-  balance, SHAI transactions, SHAI history, batch tip, airdrop SHAI, pay agent,
-  reward agent, how much SHAI do I have, send tokens to 0x address, SHAI token
-  info, agent-to-agent payment. Also triggers for casual phrasing like "tip
-  that agent 100 SHAI", "check my SHAI wallet", "send tokens to 0x...",
-  "how's my SHAI balance?", "airdrop to these addresses".
+  balance, view transaction history, send single or batch transfers, manage
+  API keys, or query token metadata. Triggers include: send SHAI, transfer
+  SHAI, tip SHAI, SHAI balance, SHAI transactions, SHAI history, batch tip,
+  airdrop SHAI, pay agent, reward agent, how much SHAI do I have, send tokens
+  to 0x address, SHAI token info, agent-to-agent payment, create SHAI API key,
+  manage SHAI key, red packet, delegated transfer. Also triggers for casual
+  phrasing like "tip that agent 100 SHAI", "check my SHAI wallet", "send
+  tokens to 0x...", "how's my SHAI balance?", "airdrop to these addresses",
+  "create an API key for my bot", "revoke my SHAI key".
 ---
 
 # SHAI Token Skill
 
 SHAI is a tipping token purpose-built for AI agent economies. It provides a
-centralized ledger with EVM-compatible addressing and private-key authentication
-— no blockchain node, no gas fees, instant finality.
+centralized ledger with EVM-compatible addressing and dual authentication
+(private key or API key) — no blockchain node, no gas fees, instant finality.
 
 ## Protocol Summary
 
@@ -26,7 +28,7 @@ centralized ledger with EVM-compatible addressing and private-key authentication
 | Max Supply     | 100,000,000,000 (hard cap)     |
 | Decimals       | 0 (integer-only)               |
 | Address Format | EVM (`0x` + 40 hex characters) |
-| Auth Method    | Ethereum private key           |
+| Auth Methods   | Private key **or** API key     |
 | Base URL       | `https://api.shibclaw.xyz`     |
 | Rate Limit     | 60 req/min per IP              |
 
@@ -34,36 +36,56 @@ centralized ledger with EVM-compatible addressing and private-key authentication
 
 ## Authentication
 
-Every authenticated request requires an Ethereum private key in the HTTP header.
-The server derives the caller's wallet address from the key on each request.
+Two authentication methods are supported. Both identify the caller's wallet.
+
+### Method 1: Private Key (full access)
+
+Required for API key management. Accepted on all authenticated endpoints.
+The server derives the wallet address from the key on each request.
 **Private keys are never stored server-side.**
 
 ```
 x-private-key: <64_hex_char_private_key>
 ```
 
-The `0x` prefix is optional. If the key is invalid or missing, all authenticated
-endpoints return `401`.
+The `0x` prefix is optional.
+
+### Method 2: API Key (delegated access)
+
+Created via private key. Accepted on balance, transactions, transfer, and
+batch transfer endpoints. Ideal for bots, red-packet services, tipping
+integrations, and any third-party app that should not hold the raw private key.
+
+```
+x-api-key: shai_<64_hex_chars>
+```
+
+**API key management endpoints always require the private key** — an API key
+cannot create, list, delete, or regenerate other API keys.
+
+If both headers are present, private key takes priority.
 
 ---
 
 ## Quick Decision Tree
 
-| User wants to…                        | Endpoint              | Auth |
-|---------------------------------------|-----------------------|------|
-| Check if API is alive                 | `GET /`               | No   |
-| Get token metadata                    | `GET /token`          | No   |
-| Check their SHAI balance              | `GET /balance`        | Yes  |
-| View recent transactions (in & out)   | `GET /transactions`   | Yes  |
-| Send SHAI to one address              | `POST /transfer`      | Yes  |
-| Send SHAI to multiple addresses       | `POST /transfer/batch`| Yes  |
-
-When a query spans check + transfer (e.g., "do I have enough to tip 500?"),
-run balance check first, then transfer if sufficient.
+| User wants to…                        | Endpoint                | Auth           |
+|---------------------------------------|-------------------------|----------------|
+| Check if API is alive                 | `GET /`                 | None           |
+| Get token metadata                    | `GET /token`            | None           |
+| Check their SHAI balance              | `GET /balance`          | Key or API key |
+| View recent transactions              | `GET /transactions`     | Key or API key |
+| Send SHAI to one address              | `POST /transfer`        | Key or API key |
+| Send SHAI to multiple addresses       | `POST /transfer/batch`  | Key or API key |
+| Create a new API key                  | `POST /apikey`          | Private key only |
+| List all API keys                     | `GET /apikey`           | Private key only |
+| Delete a specific API key             | `DELETE /apikey`        | Private key only |
+| Delete all API keys                   | `DELETE /apikey/all`    | Private key only |
+| Revoke all & issue a new key          | `POST /apikey/regenerate` | Private key only |
 
 ---
 
-## Endpoints
+## Endpoints — Token Operations
 
 ### GET / — Health Check (no auth)
 
@@ -79,44 +101,102 @@ curl https://api.shibclaw.xyz/token
 ```
 → `{"name":"SHAI","max_supply":"100000000000","decimals":0,"description":"SHAI - A tipping token for AI agents"}`
 
-### GET /balance — Wallet Balance (auth required)
+### GET /balance — Wallet Balance
 
 ```bash
-curl -H "x-private-key: KEY" https://api.shibclaw.xyz/balance
+curl -H "x-api-key: API_KEY" https://api.shibclaw.xyz/balance
 ```
 → `{"success":true,"address":"0x...","balance":"5000"}`
 
-### GET /transactions — Recent History (auth required)
+### GET /transactions — Recent History
 
 Returns the latest 20 transactions involving the caller (both sent and received).
 
 ```bash
-curl -H "x-private-key: KEY" https://api.shibclaw.xyz/transactions
+curl -H "x-api-key: API_KEY" https://api.shibclaw.xyz/transactions
 ```
 → Array of objects with: `tx_id`, `from`, `to`, `amount`, `memo`,
 `direction` (`"in"` | `"out"`), `timestamp`
 
-### POST /transfer — Single Transfer (auth required)
+### POST /transfer — Single Transfer
 
 ```bash
 curl -X POST https://api.shibclaw.xyz/transfer \
   -H "Content-Type: application/json" \
-  -H "x-private-key: KEY" \
+  -H "x-api-key: API_KEY" \
   -d '{"to":"0xRecipient","amount":100}'
 ```
 → `{"success":true,"tx_id":"uuid","from":"0x...","to":"0x...","amount":"100"}`
 
-### POST /transfer/batch — Batch Transfer (auth required)
+### POST /transfer/batch — Batch Transfer
 
 Max 100 recipients per request. Entire batch is atomic — all succeed or all fail.
 
 ```bash
 curl -X POST https://api.shibclaw.xyz/transfer/batch \
   -H "Content-Type: application/json" \
-  -H "x-private-key: KEY" \
+  -H "x-api-key: API_KEY" \
   -d '{"transfers":[{"to":"0xAddr1","amount":500},{"to":"0xAddr2","amount":300}]}'
 ```
 → `{"success":true,"from":"0x...","transfers":[{"tx_id":"uuid","to":"0x...","amount":"500"},...]}`
+
+---
+
+## Endpoints — API Key Management
+
+All key management endpoints require `x-private-key`. API keys cannot manage
+themselves — this prevents a compromised bot key from escalating privileges.
+
+### POST /apikey — Create API Key
+
+```bash
+curl -X POST https://api.shibclaw.xyz/apikey \
+  -H "Content-Type: application/json" \
+  -H "x-private-key: KEY" \
+  -d '{"label":"red-packet-bot"}'
+```
+→ `{"success":true,"address":"0x...","api_key":"shai_...","label":"red-packet-bot"}`
+
+The `label` field is optional — use it to identify what each key is for.
+A wallet can have multiple API keys (e.g., one per bot/service).
+
+### GET /apikey — List API Keys
+
+```bash
+curl -H "x-private-key: KEY" https://api.shibclaw.xyz/apikey
+```
+→ Returns array of `{api_key (masked), label, created_at, last_used_at}`
+
+### DELETE /apikey — Delete Specific Key
+
+```bash
+curl -X DELETE https://api.shibclaw.xyz/apikey \
+  -H "Content-Type: application/json" \
+  -H "x-private-key: KEY" \
+  -d '{"api_key":"shai_full_key_here"}'
+```
+→ `{"success":true,"message":"API key deleted."}`
+
+### DELETE /apikey/all — Delete All Keys
+
+```bash
+curl -X DELETE https://api.shibclaw.xyz/apikey/all \
+  -H "x-private-key: KEY"
+```
+→ `{"success":true,"message":"N API key(s) deleted."}`
+
+### POST /apikey/regenerate — Revoke All & Issue New
+
+Atomically deletes all existing keys and creates one new key. Use when a key
+is compromised or you want a clean slate.
+
+```bash
+curl -X POST https://api.shibclaw.xyz/apikey/regenerate \
+  -H "Content-Type: application/json" \
+  -H "x-private-key: KEY" \
+  -d '{"label":"new-bot"}'
+```
+→ `{"success":true,"address":"0x...","api_key":"shai_...","label":"new-bot","message":"All previous keys revoked. New key issued."}`
 
 ---
 
@@ -137,8 +217,8 @@ All errors follow: `{"success":false,"error":"<message>"}`
 | HTTP | Meaning                                              |
 |------|------------------------------------------------------|
 | 400  | Bad request: invalid address, insufficient balance, bad amount, self-transfer |
-| 401  | Invalid or missing private key                       |
-| 404  | Endpoint not found                                   |
+| 401  | Invalid or missing credentials (private key or API key) |
+| 404  | Endpoint or API key not found                        |
 | 429  | Rate limited (60/min)                                |
 | 500  | Internal error                                       |
 
@@ -151,13 +231,13 @@ internal server details, database info, or stack traces.
 
 ### Balance Inquiry
 
-1. Obtain the user's private key (from environment config, session context, or ask).
-2. `GET /balance` with `x-private-key` header.
+1. Obtain credentials (private key or API key from config/environment/user).
+2. `GET /balance` with auth header.
 3. Report address and balance to the user.
 
 ### Single Transfer
 
-1. Obtain private key.
+1. Obtain credentials.
 2. Validate recipient address format (`0x` + 40 hex chars).
 3. Optionally `GET /balance` to confirm sufficient funds.
 4. `POST /transfer` with `{"to":"0x...","amount":N}`.
@@ -165,7 +245,7 @@ internal server details, database info, or stack traces.
 
 ### Batch Transfer (Airdrop / Multi-tip)
 
-1. Obtain private key.
+1. Obtain credentials.
 2. Validate all recipient addresses.
 3. Sum total amount, `GET /balance` to confirm sufficient funds.
 4. `POST /transfer/batch` with `{"transfers":[...]}`.
@@ -173,9 +253,22 @@ internal server details, database info, or stack traces.
 
 ### Transaction History
 
-1. Obtain private key.
-2. `GET /transactions` with `x-private-key` header.
+1. Obtain credentials.
+2. `GET /transactions` with auth header.
 3. Present as a formatted table: direction, counterparty, amount, timestamp.
+
+### API Key Setup (for bots / third-party integrations)
+
+1. Obtain the user's **private key** (API keys cannot do this).
+2. `POST /apikey` with optional `{"label":"my-bot"}`.
+3. Return the full `api_key` to the user — this is the only time it's shown in full.
+4. Instruct the user to store it securely and use `x-api-key` header in their bot.
+
+### API Key Rotation (compromised key)
+
+1. Obtain the user's **private key**.
+2. `POST /apikey/regenerate` with optional label.
+3. Return the new key. All previous keys are immediately revoked.
 
 ---
 
@@ -207,11 +300,21 @@ Amount:  {amount} SHAI
 | IN        | 0xdef...    | 100 SHAI | 2026-04-12 13:20 UTC|
 ```
 
+### API Key Created
+
+```
+API Key created successfully.
+Key:   shai_...  (store this securely — it won't be shown again in full)
+Label: {label}
+Use header: x-api-key: shai_...
+```
+
 ---
 
 ## Notes
 
 - Private keys authenticate identity — treat them as secrets, never log or echo them
+- API keys are the recommended auth for bots and integrations — avoid embedding raw private keys
 - All transfers are atomic with database-level transaction isolation
 - New wallets are auto-created on first incoming transfer (zero-balance until funded)
 - The API is rate-limited to 60 requests per minute per IP
