@@ -11,7 +11,8 @@ description: >
   manage SHAI key, red packet, delegated transfer. Also triggers for casual
   phrasing like "tip that agent 100 SHAI", "check my SHAI wallet", "send
   tokens to 0x...", "how's my SHAI balance?", "airdrop to these addresses",
-  "create an API key for my bot", "revoke my SHAI key".
+  "create an API key for my bot", "revoke my SHAI key", "show my API keys",
+  "list my SHAI keys", "do I have any API keys?", "query my API key".
 ---
 
 # SHAI Token Skill
@@ -257,12 +258,32 @@ internal server details, database info, or stack traces.
 2. `GET /transactions` with auth header.
 3. Present as a formatted table: direction, counterparty, amount, timestamp.
 
+### List / Query API Keys
+
+1. Obtain the user's **private key** (API keys cannot query key lists).
+2. `GET /apikey` with `x-private-key` header.
+3. Present results as a table: masked key, label, created date, last used date.
+4. If the user asks "show my API keys" or "do I have any keys?" — use this workflow.
+
 ### API Key Setup (for bots / third-party integrations)
 
 1. Obtain the user's **private key** (API keys cannot do this).
 2. `POST /apikey` with optional `{"label":"my-bot"}`.
 3. Return the full `api_key` to the user — this is the only time it's shown in full.
 4. Instruct the user to store it securely and use `x-api-key` header in their bot.
+
+### Delete a Specific API Key
+
+1. Obtain the user's **private key**.
+2. If the user doesn't know which key to delete, run `GET /apikey` first to list them.
+3. `DELETE /apikey` with `{"api_key":"shai_full_key_here"}` in the body.
+4. Confirm deletion to the user.
+
+### Delete All API Keys
+
+1. Obtain the user's **private key**.
+2. `DELETE /apikey/all` with `x-private-key` header.
+3. Confirm how many keys were deleted.
 
 ### API Key Rotation (compromised key)
 
@@ -307,6 +328,15 @@ API Key created successfully.
 Key:   shai_...  (store this securely — it won't be shown again in full)
 Label: {label}
 Use header: x-api-key: shai_...
+```
+
+### API Key List
+
+```
+| # | Key (masked)       | Label          | Created             | Last Used           |
+|---|--------------------|----------------|---------------------|---------------------|
+| 1 | shai_fdf42f...a74b | red-packet-bot | 2026-04-12 15:23 UTC| 2026-04-12 16:00 UTC|
+| 2 | shai_a1b2c3...d4e5 | tipping-agent  | 2026-04-11 10:00 UTC| never               |
 ```
 
 ---
